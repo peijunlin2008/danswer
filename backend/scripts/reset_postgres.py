@@ -1,11 +1,21 @@
-import psycopg2
+import os
+import sys
 
-from danswer.configs.app_configs import POSTGRES_DB
-from danswer.configs.app_configs import POSTGRES_HOST
-from danswer.configs.app_configs import POSTGRES_PASSWORD
-from danswer.configs.app_configs import POSTGRES_PORT
-from danswer.configs.app_configs import POSTGRES_USER
-from danswer.db.credentials import create_initial_public_credential
+import psycopg2
+from sqlalchemy.orm import Session
+
+from onyx.db.engine import get_sqlalchemy_engine
+
+# makes it so `PYTHONPATH=.` is not required when running this script
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(parent_dir)
+
+from onyx.configs.app_configs import POSTGRES_DB  # noqa: E402
+from onyx.configs.app_configs import POSTGRES_HOST  # noqa: E402
+from onyx.configs.app_configs import POSTGRES_PASSWORD  # noqa: E402
+from onyx.configs.app_configs import POSTGRES_PORT  # noqa: E402
+from onyx.configs.app_configs import POSTGRES_USER  # noqa: E402
+from onyx.db.credentials import create_initial_public_credential  # noqa: E402
 
 
 def wipe_all_rows(database: str) -> None:
@@ -52,10 +62,11 @@ def wipe_all_rows(database: str) -> None:
 
 
 if __name__ == "__main__":
-    print("Cleaning up all Danswer tables")
+    print("Cleaning up all Onyx tables")
     wipe_all_rows(POSTGRES_DB)
-    create_initial_public_credential()
+    with Session(get_sqlalchemy_engine(), expire_on_commit=False) as db_session:
+        create_initial_public_credential(db_session)
     print("To keep data consistent, it's best to wipe the document index as well.")
     print(
-        "To be safe, it's best to restart the Danswer services (API Server and Background Tasks"
+        "To be safe, it's best to restart the Onyx services (API Server and Background Tasks"
     )

@@ -1,72 +1,80 @@
 import { HealthCheckBanner } from "@/components/health/healthcheck";
-import { DISABLE_AUTH, OAUTH_NAME } from "@/lib/constants";
 import { User } from "@/lib/types";
-import { getGoogleOAuthUrlSS, getCurrentUserSS } from "@/lib/userSS";
+import {
+  getCurrentUserSS,
+  getAuthUrlSS,
+  getAuthTypeMetadataSS,
+  AuthTypeMetadata,
+} from "@/lib/userSS";
 import { redirect } from "next/navigation";
+import AuthFlowContainer from "@/components/auth/AuthFlowContainer";
+import LoginPage from "./LoginPage";
 
-const BUTTON_STYLE =
-  "group relative w-64 flex justify-center " +
-  "py-2 px-4 border border-transparent text-sm " +
-  "font-medium rounded-md text-white bg-red-600 " +
-  " mx-auto";
-
-const Page = async () => {
-  // no need for any of the below if auth is disabled
-  if (DISABLE_AUTH) {
-    return redirect("/");
-  }
+const Page = async (props: {
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
+}) => {
+  const searchParams = await props.searchParams;
+  const autoRedirectDisabled = searchParams?.disableAutoRedirect === "true";
+  const nextUrl = Array.isArray(searchParams?.next)
+    ? searchParams?.next[0]
+    : searchParams?.next || null;
 
   // catch cases where the backend is completely unreachable here
   // without try / catch, will just raise an exception and the page
   // will not render
+  let authTypeMetadata: AuthTypeMetadata | null = null;
   let currentUser: User | null = null;
-  let authorizationUrl: string | null = null;
   try {
-    [currentUser, authorizationUrl] = await Promise.all([
+    [authTypeMetadata, currentUser] = await Promise.all([
+      getAuthTypeMetadataSS(),
       getCurrentUserSS(),
-      getGoogleOAuthUrlSS(),
     ]);
   } catch (e) {
     console.log(`Some fetch failed for the login page - ${e}`);
   }
 
+  // simply take the user to the home page if Auth is disabled
+  if (authTypeMetadata?.authType === "disabled") {
+    return redirect("/chat");
+  }
+
   // if user is already logged in, take them to the main app page
-  if (currentUser && currentUser.is_active && currentUser.is_verified) {
-    return redirect("/");
+  if (currentUser && currentUser.is_active && !currentUser.is_anonymous_user) {
+    if (authTypeMetadata?.requiresVerification && !currentUser.is_verified) {
+      return redirect("/auth/waiting-on-verification");
+    }
+    return redirect("/chat");
+  }
+
+  // get where to send the user to authenticate
+  let authUrl: string | null = null;
+  if (authTypeMetadata) {
+    try {
+      authUrl = await getAuthUrlSS(authTypeMetadata.authType, nextUrl!);
+    } catch (e) {
+      console.log(`Some fetch failed for the login page - ${e}`);
+    }
+  }
+
+  if (authTypeMetadata?.autoRedirect && authUrl && !autoRedirectDisabled) {
+    return redirect(authUrl);
   }
 
   return (
-    <main>
-      <div className="absolute top-10x w-full">
-        <HealthCheckBanner />
-      </div>
-      <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-md w-full space-y-8">
-          <div>
-            <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-200">
-              danswer 💃
-            </h2>
-          </div>
-          <div className="flex">
-            {authorizationUrl ? (
-              <a
-                href={authorizationUrl || ""}
-                className={
-                  BUTTON_STYLE +
-                  " focus:outline-none focus:ring-2 hover:bg-red-700 focus:ring-offset-2 focus:ring-red-500"
-                }
-              >
-                Sign in with {OAUTH_NAME}
-              </a>
-            ) : (
-              <button className={BUTTON_STYLE + " cursor-default"}>
-                Sign in with {OAUTH_NAME}
-              </button>
-            )}
-          </div>
+    <div className="flex flex-col ">
+      <AuthFlowContainer authState="login">
+        <div className="absolute top-10x w-full">
+          <HealthCheckBanner />
         </div>
-      </div>
-    </main>
+
+        <LoginPage
+          authUrl={authUrl}
+          authTypeMetadata={authTypeMetadata}
+          nextUrl={nextUrl!}
+          searchParams={searchParams}
+        />
+      </AuthFlowContainer>
+    </div>
   );
 };
 
