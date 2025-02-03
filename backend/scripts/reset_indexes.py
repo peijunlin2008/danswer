@@ -1,56 +1,74 @@
 # This file is purely for development use, not included in any builds
-import requests
-from qdrant_client.http.models import Distance
-from qdrant_client.http.models import VectorParams
-from typesense.exceptions import ObjectNotFound  # type: ignore
+import os
+import sys
+from time import sleep
 
-from danswer.configs.app_configs import DOCUMENT_INDEX_NAME
-from danswer.configs.model_configs import DOC_EMBEDDING_DIM
-from danswer.datastores.document_index import get_default_document_index
-from danswer.datastores.document_index import SplitDocumentIndex
-from danswer.datastores.typesense.store import create_typesense_collection
-from danswer.datastores.vespa.store import DOCUMENT_ID_ENDPOINT
-from danswer.datastores.vespa.store import VespaIndex
-from danswer.utils.clients import get_qdrant_client
-from danswer.utils.clients import get_typesense_client
-from danswer.utils.logger import setup_logger
+import requests
+from requests.exceptions import RequestException
+
+# makes it so `PYTHONPATH=.` is not required when running this script
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(parent_dir)
+
+from onyx.configs.app_configs import DOCUMENT_INDEX_NAME  # noqa: E402
+from onyx.document_index.vespa.index import DOCUMENT_ID_ENDPOINT  # noqa: E402
+from onyx.utils.logger import setup_logger  # noqa: E402
 
 logger = setup_logger()
 
 
-def recreate_qdrant_collection(
-    collection_name: str, embedding_dim: int = DOC_EMBEDDING_DIM
-) -> None:
-    logger.info(f"Attempting to recreate Qdrant collection {collection_name}")
-    result = get_qdrant_client().recreate_collection(
-        collection_name=collection_name,
-        vectors_config=VectorParams(size=embedding_dim, distance=Distance.COSINE),
-    )
-    if not result:
-        raise RuntimeError("Could not create Qdrant collection")
+def wipe_vespa_index() -> bool:
+    """
+    Wipes the Vespa index by deleting all documents.
+    """
+    continuation = None
+    should_continue = True
+    RETRIES = 3
+
+    while should_continue:
+        params = {"selection": "true", "cluster": DOCUMENT_INDEX_NAME}
+        if continuation:
+            params["continuation"] = continuation
+
+        for attempt in range(RETRIES):
+            try:
+                response = requests.delete(DOCUMENT_ID_ENDPOINT, params=params)
+                response.raise_for_status()
+
+                response_json = response.json()
+                logger.info(f"Response: {response_json}")
+
+                continuation = response_json.get("continuation")
+                should_continue = bool(continuation)
+                break  # Exit the retry loop if the request is successful
+
+            except RequestException:
+                logger.exception("Request failed")
+                sleep(2**attempt)  # Exponential backoff
+        else:
+            logger.error(f"Max retries ({RETRIES}) exceeded. Exiting.")
+            return False
+
+    return True
 
 
-def recreate_typesense_collection(collection_name: str) -> None:
-    logger.info(f"Attempting to recreate Typesense collection {collection_name}")
-    ts_client = get_typesense_client()
+def main() -> int:
+    """
+    Main function to execute the script.
+    """
     try:
-        ts_client.collections[collection_name].delete()
-    except ObjectNotFound:
-        logger.debug(f"Collection {collection_name} does not already exist")
+        succeeded = wipe_vespa_index()
+    except Exception:
+        logger.exception("wipe_vespa_index exceptioned.")
+        return 1
 
-    create_typesense_collection(collection_name)
+    if not succeeded:
+        logger.info("Vespa index wipe failed.")
+        return 0
 
-
-def wipe_vespa_index() -> None:
-    params = {"selection": "true", "cluster": DOCUMENT_INDEX_NAME}
-    response = requests.delete(DOCUMENT_ID_ENDPOINT, params=params)
-    response.raise_for_status()
+    logger.info("Vespa index wiped successfully.")
+    return 1
 
 
 if __name__ == "__main__":
-    document_index = get_default_document_index()
-    if isinstance(document_index, SplitDocumentIndex):
-        recreate_qdrant_collection("danswer_index")
-        recreate_typesense_collection("danswer_index")
-    elif isinstance(document_index, VespaIndex):
-        wipe_vespa_index()
+    sys.exit(main())

@@ -1,22 +1,25 @@
-import { Credential } from "@/lib/types";
-
-interface SetupGoogleDriveArgs {
-  isPublic: boolean;
-}
+import { Credential } from "./connectors/credentials";
 
 export const setupGoogleDriveOAuth = async ({
-  isPublic,
-}: SetupGoogleDriveArgs): Promise<[string | null, string]> => {
+  isAdmin,
+  name,
+}: {
+  isAdmin: boolean;
+  name: string;
+}): Promise<[string | null, string]> => {
   const credentialCreationResponse = await fetch("/api/manage/credential", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      public_doc: isPublic,
+      admin_public: isAdmin,
       credential_json: {},
+      source: "google_drive",
+      name: name,
     }),
   });
+
   if (!credentialCreationResponse.ok) {
     return [
       null,
@@ -35,6 +38,7 @@ export const setupGoogleDriveOAuth = async ({
       `Failed to create credential - ${authorizationUrlResponse.status}`,
     ];
   }
+
   const authorizationUrlJson = (await authorizationUrlResponse.json()) as {
     auth_url: string;
   };

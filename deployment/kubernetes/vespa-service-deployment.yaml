@@ -35,7 +35,7 @@ spec:
     spec:
       containers:
       - name: vespa
-        image: vespaengine/vespa:8
+        image: vespaengine/vespa:8.277.17
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
@@ -49,15 +49,14 @@ spec:
             port: 19071
             scheme: HTTP
         volumeMounts:
-        - name: vespa-storage
+        - name: vespa-volume
           mountPath: /opt/vespa/var/
   volumeClaimTemplates:
   - metadata:
-      name: vespa-storage
+      name: vespa-volume
     spec:
-      accessModes:
-      - ReadWriteOnce
+      accessModes: [ "ReadWriteOnce" ]
       resources:
         requests:
           # Adjust the storage request size as needed.
-          storage: 1Gi
+          storage: 50Gi

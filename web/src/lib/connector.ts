@@ -1,5 +1,10 @@
-import { Connector, ConnectorBase, ValidSources } from "./types";
-
+import { PopupSpec } from "@/components/admin/connectors/Popup";
+import { ValidSources } from "./types";
+import {
+  Connector,
+  ConnectorBase,
+  ConnectorSnapshot,
+} from "./connectors/connectors";
 async function handleResponse(
   response: Response
 ): Promise<[string | null, any]> {
@@ -8,6 +13,18 @@ async function handleResponse(
     return [null, responseJson];
   }
   return [responseJson.detail, null];
+}
+
+export async function fetchConnectors(
+  credential_id: number
+): Promise<ConnectorSnapshot[]> {
+  const url = `/api/manage/admin/connector?credential=${credential_id}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch connectors: ${await response.text()}`);
+  }
+  const connectors: ConnectorSnapshot[] = await response.json();
+  return connectors;
 }
 
 export async function createConnector<T>(
@@ -21,6 +38,38 @@ export async function createConnector<T>(
     body: JSON.stringify(connector),
   });
   return handleResponse(response);
+}
+
+export async function updateConnectorCredentialPairName(
+  ccPairId: number,
+  newName: string
+): Promise<Response> {
+  return fetch(
+    `/api/manage/admin/cc-pair/${ccPairId}/name?new_name=${encodeURIComponent(newName)}`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }
+  );
+}
+
+export async function updateConnectorCredentialPairProperty(
+  ccPairId: number,
+  name: string,
+  value: string
+): Promise<Response> {
+  return fetch(`/api/manage/admin/cc-pair/${ccPairId}/property`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: name,
+      value: value,
+    }),
+  });
 }
 
 export async function updateConnector<T>(
@@ -53,12 +102,17 @@ export async function deleteConnector(
 
 export async function runConnector(
   connectorId: number,
-  credentialIds: number[] | null = null
+  credentialIds: number[],
+  fromBeginning: boolean = false
 ): Promise<string | null> {
   const response = await fetch("/api/manage/admin/connector/run-once", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ connector_id: connectorId, credentialIds }),
+    body: JSON.stringify({
+      connector_id: connectorId,
+      credentialIds,
+      from_beginning: fromBeginning,
+    }),
   });
   if (!response.ok) {
     return (await response.json()).detail;
@@ -66,7 +120,7 @@ export async function runConnector(
   return null;
 }
 
-export async function deleteConnectorIfExists({
+export async function deleteConnectorIfExistsAndIsUnlinked({
   source,
   name,
 }: {
@@ -80,7 +134,10 @@ export async function deleteConnectorIfExists({
       (connector) =>
         connector.source === source && (!name || connector.name === name)
     );
-    if (matchingConnectors.length > 0) {
+    if (
+      matchingConnectors.length > 0 &&
+      matchingConnectors[0].credential_ids.length === 0
+    ) {
       const errorMsg = await deleteConnector(matchingConnectors[0].id);
       if (errorMsg) {
         return errorMsg;

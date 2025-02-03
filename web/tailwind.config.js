@@ -1,19 +1,15 @@
-/** @type {import('tailwindcss').Config} */
-module.exports = {
-  content: [
-    "./app/**/*.{js,ts,jsx,tsx,mdx}",
-    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
-    "./components/**/*.{js,ts,jsx,tsx,mdx}",
+var merge = require("lodash/merge");
 
-    // Or if using `src` directory:
-    "./src/**/*.{js,ts,jsx,tsx,mdx}",
-  ],
-  theme: {
-    extend: {
-      fontFamily: {
-        sans: ["var(--font-inter)"],
-      },
-    },
-  },
-  plugins: [require("@tailwindcss/typography")],
-};
+// Use relative paths for imports
+const baseThemes = require("./tailwind-themes/tailwind.config.js");
+
+const customThemes = process.env.NEXT_PUBLIC_THEME
+  ? require(
+      process.env.NEXT_PUBLIC_THEME
+        ? `./tailwind-themes/custom/${process.env.NEXT_PUBLIC_THEME}/tailwind.config.js`
+        : "./tailwind-themes/custom/default/tailwind.config.js"
+    )
+  : null;
+
+/** @type {import('tailwindcss').Config} */
+module.exports = customThemes ? merge(baseThemes, customThemes) : baseThemes;

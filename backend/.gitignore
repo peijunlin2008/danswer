@@ -1,10 +1,12 @@
 __pycache__/
+.mypy_cache
 .idea/
 site_crawls/
 .ipynb_checkpoints/
 api_keys.py
 *ipynb
-qdrant-data/
-typesense-data/
-.env
+.env*
 vespa-app.zip
+dynamic_config_storage/
+celerybeat-schedule*
+onyx/connectors/salesforce/data/

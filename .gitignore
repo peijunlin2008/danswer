@@ -1,2 +1,10 @@
 .env
 .DS_store
+.venv
+.mypy_cache
+.idea
+/deployment/data/nginx/app.conf
+.vscode/
+*.sw?
+/backend/tests/regression/answer_quality/search_test_config.yaml
+/web/test-results/
