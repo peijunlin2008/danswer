@@ -56,6 +56,7 @@ from kubernetes.client.rest import ApiException  # type: ignore
 from kubernetes.stream import stream as k8s_stream  # type: ignore
 
 from onyx.db.enums import SandboxStatus
+from onyx.server.features.build.api.packet_logger import get_packet_logger
 from onyx.server.features.build.configs import OPENCODE_DISABLED_TOOLS
 from onyx.server.features.build.configs import SANDBOX_CONTAINER_IMAGE
 from onyx.server.features.build.configs import SANDBOX_FILE_SYNC_SERVICE_ACCOUNT
@@ -319,6 +320,7 @@ class KubernetesSandboxManager(SandboxManager):
             template_path=self._agent_instructions_template_path,
             skills_path=self._skills_path,
             files_path=None,  # Files are synced after pod creation
+            attachments_path=None,  # Attachments won't exist until session workspace is created
             provider=provider,
             model_name=model_name,
             nextjs_port=nextjs_port,
@@ -362,13 +364,20 @@ class KubernetesSandboxManager(SandboxManager):
                 f"""
 set -e
 
+# Handle SIGTERM for fast container termination
+trap 'echo "Received SIGTERM, exiting"; exit 0' TERM
+
 # Initial sync on startup - sync knowledge files for this user/tenant
 echo "Starting initial file sync for tenant: {tenant_id} / user: {user_id}"
 aws s3 sync "s3://{self._s3_bucket}/{tenant_id}/knowledge/{user_id}/" /workspace/files/
 
 echo "Initial sync complete, staying alive for incremental syncs"
 # Stay alive - incremental sync commands will be executed via kubectl exec
-sleep infinity
+# Use 'wait' so shell can respond to signals while sleeping
+while true; do
+    sleep 30 &
+    wait $!
+done
 """
             ],
             volume_mounts=[
@@ -409,7 +418,7 @@ sleep infinity
             ],
             resources=client.V1ResourceRequirements(
                 requests={"cpu": "500m", "memory": "1Gi"},
-                limits={"cpu": "2000m", "memory": "4Gi"},
+                limits={"cpu": "2000m", "memory": "6Gi"},
             ),
             # TODO: Re-enable probes when sandbox container runs actual services.
             # Note: Next.js ports are now per-session (dynamic), so container-level
@@ -1455,19 +1464,45 @@ echo '{tar_b64}' | base64 -d | tar -xzf -
         Yields:
             Typed ACP schema event objects
         """
+        packet_logger = get_packet_logger()
         pod_name = self._get_pod_name(str(sandbox_id))
         session_path = f"/workspace/sessions/{session_id}"
+
+        # Log ACP client creation
+        packet_logger.log_acp_client_start(
+            sandbox_id, session_id, session_path, context="k8s"
+        )
+
         exec_client = ACPExecClient(
             pod_name=pod_name,
             namespace=self._namespace,
             container="sandbox",
         )
+
+        # Log the send_message call at sandbox manager level
+        packet_logger.log_session_start(session_id, sandbox_id, message)
+
+        events_count = 0
         try:
             exec_client.start(cwd=session_path)
             for event in exec_client.send_message(message):
+                events_count += 1
                 yield event
+
+            # Log successful completion
+            packet_logger.log_session_end(
+                session_id, success=True, events_count=events_count
+            )
+        except Exception as e:
+            # Log failure
+            packet_logger.log_session_end(
+                session_id, success=False, error=str(e), events_count=events_count
+            )
+            raise
         finally:
             exec_client.stop()
+            # Log client stop
+            packet_logger.log_acp_client_stop(sandbox_id, session_id, context="k8s")
 
     def list_directory(
         self, sandbox_id: UUID, session_id: UUID, path: str

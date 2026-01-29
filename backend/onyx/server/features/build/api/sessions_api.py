@@ -33,6 +33,7 @@ from onyx.server.features.build.db.build_session import allocate_nextjs_port
 from onyx.server.features.build.db.build_session import get_build_session
 from onyx.server.features.build.db.sandbox import get_latest_snapshot_for_session
 from onyx.server.features.build.db.sandbox import get_sandbox_by_user_id
+from onyx.server.features.build.db.sandbox import update_sandbox_heartbeat
 from onyx.server.features.build.db.sandbox import update_sandbox_status__no_commit
 from onyx.server.features.build.sandbox import get_sandbox_manager
 from onyx.server.features.build.session.manager import SessionManager
@@ -98,6 +99,7 @@ def create_session(
             user_level=request.user_level if request.demo_data_enabled else None,
             llm_provider_type=request.llm_provider_type,
             llm_model_name=request.llm_model_name,
+            demo_data_enabled=request.demo_data_enabled,
         )
         db_session.commit()
     except ValueError as e:
@@ -328,6 +330,8 @@ def restore_session(
                 logger.info(
                     f"Session {session_id} workspace was restored by another request"
                 )
+                # Update heartbeat to mark sandbox as active
+                update_sandbox_heartbeat(db_session, sandbox.id)
                 base_response = SessionResponse.from_model(session, sandbox)
                 return DetailedSessionResponse.from_session_response(
                     base_response, session_loaded_in_sandbox=True
@@ -422,6 +426,9 @@ def restore_session(
     finally:
         if lock.owned():
             lock.release()
+
+    # Update heartbeat to mark sandbox as active after successful restore
+    update_sandbox_heartbeat(db_session, sandbox.id)
 
     base_response = SessionResponse.from_model(session, sandbox)
     return DetailedSessionResponse.from_session_response(
